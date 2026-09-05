@@ -31,4 +31,8 @@ pub struct Config {
     /// Custom rejection message
     #[arg(long, default_value = "550 5.7.1 DKIM verification failed")]
     pub reject_message: String,
+
+    /// Log level [trace, debug, info, warn, error]
+    #[arg(short, long, default_value = "info")]
+    pub log_level: tracing::Level,
 }

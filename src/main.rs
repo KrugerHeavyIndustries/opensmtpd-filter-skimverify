@@ -132,10 +132,7 @@ fn main() -> ExitCode {
     let config = Config::parse();
 
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("opensmtpd_filter_skimverify=info".parse().unwrap()),
-        )
+        .with_max_level(config.log_level)
         .with_writer(io::stderr)
         .init();
 

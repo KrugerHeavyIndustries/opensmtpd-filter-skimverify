@@ -59,10 +59,10 @@ filter skimverify proc-exec "/usr/local/libexec/filter-skimverify -H mail.exampl
 
 ### Logging
 
-Logs are written to stderr at `info` level by default. Control verbosity with the `RUST_LOG` environment variable:
+Logs are written to stderr at `info` level by default. Control verbosity with the --log-level command line argument:
 
 ```
-filter skimverify proc-exec "RUST_LOG=debug /usr/local/libexec/filter-skimverify -H mail.example.com"
+filter skimverify proc-exec "/usr/local/libexec/filter-skimverify -H mail.example.com --log-level debug"
 ```
 
 ## Example output
