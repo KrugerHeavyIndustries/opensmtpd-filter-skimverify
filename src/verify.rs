@@ -17,7 +17,8 @@
 use std::net::IpAddr;
 
 use mail_auth::common::verify::VerifySignature;
-use mail_auth::{AuthenticatedMessage, DkimResult, Resolver, SpfResult};
+use mail_auth::spf::verify::SpfParameters;
+use mail_auth::{AuthenticatedMessage, DkimResult, SpfResult, MessageAuthenticator};
 
 #[derive(Debug, Clone)]
 pub struct VerificationResult {
@@ -42,14 +43,14 @@ pub struct SpfStatus {
 }
 
 pub async fn verify_message(
-    resolver: &Resolver,
+    authenticator: &MessageAuthenticator,
     raw_message: &[u8],
     mail_from: Option<&str>,
     helo_domain: Option<&str>,
     source_ip: Option<&str>,
 ) -> VerificationResult {
-    let dkim_result = verify_dkim(resolver, raw_message).await;
-    let spf_result = verify_spf(resolver, source_ip, helo_domain, mail_from).await;
+    let dkim_result = verify_dkim(authenticator, raw_message).await;
+    let spf_result = verify_spf(authenticator, source_ip, helo_domain, mail_from).await;
     let alignment_pass = check_dkim_alignment(&dkim_result, mail_from);
 
     VerificationResult {
@@ -81,7 +82,7 @@ struct SpfVerifyResult {
     smtp_helo: Option<String>,
 }
 
-async fn verify_dkim(resolver: &Resolver, raw_message: &[u8]) -> DkimVerifyResult {
+async fn verify_dkim(authenticator: &MessageAuthenticator, raw_message: &[u8]) -> DkimVerifyResult {
     let authenticated_message = match AuthenticatedMessage::parse(raw_message) {
         Some(msg) => msg,
         None => {
@@ -94,7 +95,7 @@ async fn verify_dkim(resolver: &Resolver, raw_message: &[u8]) -> DkimVerifyResul
         }
     };
 
-    let dkim_output = resolver.verify_dkim(&authenticated_message).await;
+    let dkim_output = authenticator.verify_dkim(&authenticated_message).await;
 
     if dkim_output.is_empty() {
         return DkimVerifyResult {
@@ -138,7 +139,7 @@ async fn verify_dkim(resolver: &Resolver, raw_message: &[u8]) -> DkimVerifyResul
 }
 
 async fn verify_spf(
-    resolver: &Resolver,
+    authenticator: &MessageAuthenticator,
     source_ip: Option<&str>,
     helo_domain: Option<&str>,
     mail_from: Option<&str>,
@@ -158,7 +159,13 @@ async fn verify_spf(
     let default_sender = format!("postmaster@{}", helo);
     let sender = mail_from.unwrap_or(&default_sender);
 
-    let output = resolver.verify_spf(ip, helo, helo, sender).await;
+    let output = authenticator
+        .verify_spf(SpfParameters::verify_mail_from(
+            ip,
+            helo,
+            helo,
+            sender
+        )).await;
 
     let result = match output.result() {
         SpfResult::Pass => "pass",

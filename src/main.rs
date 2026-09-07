@@ -19,7 +19,7 @@ mod verify;
 
 use clap::Parser;
 use config::Config;
-use mail_auth::Resolver;
+use mail_auth::MessageAuthenticator;
 use opensmtpd_filter::{Address, Direction, Filter, FilterResponse, Session, SmtpFilterRunner};
 use std::collections::HashMap;
 use std::io;
@@ -29,7 +29,7 @@ use verify::{format_auth_results, verify_message, VerificationResult};
 
 struct DkimVerifyFilter {
     config: Config,
-    resolver: Resolver,
+    authenticator: MessageAuthenticator,
     rt: tokio::runtime::Runtime,
     message_lines: HashMap<u64, Vec<String>>,
     pending_results: HashMap<u64, VerificationResult>,
@@ -64,7 +64,7 @@ impl Filter for DkimVerifyFilter {
         let source_ip = Self::source_ip(session);
 
         let result = self.rt.block_on(verify_message(
-            &self.resolver,
+            &self.authenticator,
             &raw_message,
             mail_from,
             helo_domain,
@@ -146,15 +146,14 @@ fn main() -> ExitCode {
         .build()
         .expect("failed to create tokio runtime");
 
-    let resolver = rt
-        .block_on(async { Resolver::new_system_conf() })
-        .expect("failed to create DNS resolver");
+    let authenticator = rt.block_on(async { MessageAuthenticator::new_system_conf() })
+                          .expect("failed to create mail_auth::Authenticator");
 
     let reject_on_fail = config.reject_on_fail;
 
     let filter = DkimVerifyFilter {
         config,
-        resolver,
+        authenticator,
         rt,
         message_lines: HashMap::new(),
         pending_results: HashMap::new(),

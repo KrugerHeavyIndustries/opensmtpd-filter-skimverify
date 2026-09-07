@@ -6,7 +6,7 @@ description = "OpenSMTPD filter for DKIM signature verification and SPF alignmen
 
 [dependencies]
 opensmtpd-filter = { git = "https://github.com/KrugerHeavyIndustries/opensmtpd-filter_rs" }
-mail-auth = "0.4"
+mail-auth = "0.12.1"
 tokio = { version = "1", features = ["rt", "net"] }
 clap = { version = "4", features = ["derive"] }
 tracing = "0.1"
