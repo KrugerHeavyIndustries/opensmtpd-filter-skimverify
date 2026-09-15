@@ -85,17 +85,9 @@ impl Filter for DkimVerifyFilter {
         }
 
         let mut output = Vec::with_capacity(lines.len() + 2);
-        let mut in_headers = true;
-        let mut header_inserted = false;
+        output.push(auth_header);
 
         for msg_line in &lines {
-            if in_headers && msg_line.is_empty() {
-                if !header_inserted {
-                    output.push(auth_header.clone());
-                    header_inserted = true;
-                }
-                in_headers = false;
-            }
             output.push(msg_line.clone());
         }
 
