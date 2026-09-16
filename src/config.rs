@@ -34,5 +34,5 @@ pub struct Config {
 
     /// Log level [trace, debug, info, warn, error]
     #[arg(short, long, default_value = "info")]
-    pub log_level: tracing::Level,
+    pub log_level: log::LevelFilter,
 }

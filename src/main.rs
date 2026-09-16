@@ -22,9 +22,8 @@ use config::Config;
 use mail_auth::MessageAuthenticator;
 use opensmtpd_filter::{Address, Direction, Filter, FilterResponse, Session, SmtpFilterRunner};
 use std::collections::HashMap;
-use std::io;
 use std::process::ExitCode;
-use tracing::{info, warn};
+use log::{info, warn};
 use verify::{format_auth_results, verify_message, VerificationResult};
 
 struct DkimVerifyFilter {
@@ -73,11 +72,8 @@ impl Filter for DkimVerifyFilter {
 
         let auth_header = format_auth_results(&self.config.hostname, &result);
         info!(
-            reqid = format_args!("{:016x}", reqid),
-            dkim = result.dkim.result,
-            spf = result.spf.result,
-            aligned = result.alignment_pass,
-            "verification complete"
+            "reqid={:016x} dkim={} spf={} aligned={} verification complete",
+            reqid, result.dkim.result, result.spf.result, result.alignment_pass
         );
 
         if self.config.reject_on_fail {
@@ -101,9 +97,8 @@ impl Filter for DkimVerifyFilter {
             let spf_pass = result.spf.result == "pass";
             if !dkim_pass || !spf_pass || !result.alignment_pass {
                 warn!(
-                    reqid = format_args!("{:016x}", session.reqid),
-                    dkim_domain = ?result.dkim.domain,
-                    "rejecting message: authentication failed"
+                    "reqid={:016x} dkim_domain={:?} rejecting message: authentication failed",
+                    session.reqid, result.dkim.domain
                 );
                 return FilterResponse::Reject {
                     code: 550,
@@ -123,9 +118,9 @@ impl Filter for DkimVerifyFilter {
 fn main() -> ExitCode {
     let config = Config::parse();
 
-    tracing_subscriber::fmt()
-        .with_max_level(config.log_level)
-        .with_writer(io::stderr)
+    env_logger::Builder::new()
+        .filter_level(config.log_level)
+        .write_style(env_logger::WriteStyle::Never)
         .init();
 
     info!(
