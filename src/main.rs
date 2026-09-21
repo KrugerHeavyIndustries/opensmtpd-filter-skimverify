@@ -24,7 +24,7 @@ use opensmtpd_filter::{Address, Direction, Filter, FilterResponse, Session, Smtp
 use std::collections::HashMap;
 use std::process::ExitCode;
 use log::{info, warn};
-use verify::{format_auth_results, verify_message, VerificationResult};
+use verify::{format_auth_results, format_received_spf, verify_message, VerificationResult};
 
 struct DkimVerifyFilter {
     config: Config,
@@ -71,6 +71,7 @@ impl Filter for DkimVerifyFilter {
         ));
 
         let auth_header = format_auth_results(&self.config.hostname, &result);
+        let received_spf_header = format_received_spf(&self.config.hostname, &result.spf);
         info!(
             "reqid={:016x} dkim={} spf={} aligned={} verification complete",
             reqid, result.dkim.result, result.spf.result, result.alignment_pass
@@ -80,8 +81,9 @@ impl Filter for DkimVerifyFilter {
             self.pending_results.insert(reqid, result);
         }
 
-        let mut output = Vec::with_capacity(lines.len() + 2);
+        let mut output = Vec::with_capacity(lines.len() + 3);
         output.push(auth_header);
+        output.push(received_spf_header);
 
         for msg_line in &lines {
             output.push(msg_line.clone());
