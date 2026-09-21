@@ -40,6 +40,8 @@ pub struct SpfStatus {
     pub result: &'static str,
     pub smtp_mailfrom: Option<String>,
     pub smtp_helo: Option<String>,
+    pub client_ip: Option<String>,
+    pub domain: Option<String>,
 }
 
 pub async fn verify_message(
@@ -64,6 +66,8 @@ pub async fn verify_message(
             result: spf_result.result,
             smtp_mailfrom: spf_result.smtp_mailfrom,
             smtp_helo: spf_result.smtp_helo,
+            client_ip: spf_result.client_ip,
+            domain: spf_result.domain,
         },
         alignment_pass,
     }
@@ -80,6 +84,8 @@ struct SpfVerifyResult {
     result: &'static str,
     smtp_mailfrom: Option<String>,
     smtp_helo: Option<String>,
+    client_ip: Option<String>,
+    domain: Option<String>,
 }
 
 async fn verify_dkim(authenticator: &MessageAuthenticator, raw_message: &[u8]) -> DkimVerifyResult {
@@ -151,6 +157,8 @@ async fn verify_spf(
                 result: "none",
                 smtp_mailfrom: mail_from.map(|s| s.to_string()),
                 smtp_helo: helo_domain.map(|s| s.to_string()),
+                client_ip: None,
+                domain: None,
             };
         }
     };
@@ -181,6 +189,8 @@ async fn verify_spf(
         result,
         smtp_mailfrom: mail_from.map(|s| s.to_string()),
         smtp_helo: Some(helo.to_string()),
+        client_ip: Some(ip.to_string()),
+        domain: Some(output.domain().to_string()),
     }
 }
 
@@ -247,6 +257,60 @@ pub fn format_auth_results(hostname: &str, result: &VerificationResult) -> Strin
     format!("Authentication-Results: {}; {}", hostname, parts.join("; "))
 }
 
+pub fn format_received_spf(hostname: &str, spf: &SpfStatus) -> String {
+    let comment = spf_comment(hostname, spf);
+    let mut header = format!("Received-SPF: {} ({}) receiver={};", spf.result, comment, hostname);
+
+    if let Some(ref ip) = spf.client_ip {
+        header.push_str(&format!(" client-ip={};", ip));
+    }
+
+    if let Some(ref mailfrom) = spf.smtp_mailfrom {
+        header.push_str(&format!(" envelope-from=\"{}\";", mailfrom));
+    }
+
+    if let Some(ref helo) = spf.smtp_helo {
+        header.push_str(&format!(" helo={};", helo));
+    }
+
+    header
+}
+
+fn spf_comment(hostname: &str, spf: &SpfStatus) -> String {
+    let sender = spf.smtp_mailfrom.as_deref().unwrap_or("postmaster");
+    let client_ip = spf.client_ip.as_deref().unwrap_or("unknown");
+    let domain = spf.domain.as_deref()
+        .or(spf.smtp_mailfrom.as_deref().and_then(|m| m.rsplit('@').next()))
+        .unwrap_or("unknown");
+
+    match spf.result {
+        "pass" => format!(
+            "{}: domain of {} designates {} as permitted sender",
+            hostname, sender, client_ip
+        ),
+        "fail" => format!(
+            "{}: domain of {} does not designate {} as permitted sender",
+            hostname, sender, client_ip
+        ),
+        "softfail" => format!(
+            "{}: transitioning domain of {} does not designate {} as permitted sender",
+            hostname, sender, client_ip
+        ),
+        "neutral" => format!(
+            "{}: {} is neither permitted nor denied by domain of {}",
+            hostname, client_ip, sender
+        ),
+        "none" => format!(
+            "{}: {} does not designate permitted sender hosts",
+            hostname, domain
+        ),
+        _ => format!(
+            "{}: error in processing during lookup of {}",
+            hostname, sender
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +352,8 @@ mod tests {
                 result: "pass",
                 smtp_mailfrom: Some("user@example.com".to_string()),
                 smtp_helo: Some("mail.example.com".to_string()),
+                client_ip: Some("192.0.2.1".to_string()),
+                domain: Some("example.com".to_string()),
             },
             alignment_pass: true,
         };
@@ -311,6 +377,8 @@ mod tests {
                 result: "none",
                 smtp_mailfrom: None,
                 smtp_helo: Some("unknown".to_string()),
+                client_ip: None,
+                domain: None,
             },
             alignment_pass: false,
         };
@@ -318,6 +386,54 @@ mod tests {
         assert_eq!(
             header,
             "Authentication-Results: mx.example.com; dkim=fail (body hash did not verify) header.d=spoofed.com; spf=none smtp.helo=unknown"
+        );
+    }
+
+    #[test]
+    fn test_format_received_spf_pass() {
+        let spf = SpfStatus {
+            result: "pass",
+            smtp_mailfrom: Some("user@example.com".to_string()),
+            smtp_helo: Some("mail.example.com".to_string()),
+            client_ip: Some("192.0.2.1".to_string()),
+            domain: Some("example.com".to_string()),
+        };
+        let header = format_received_spf("mx.example.com", &spf);
+        assert_eq!(
+            header,
+            "Received-SPF: pass (mx.example.com: domain of user@example.com designates 192.0.2.1 as permitted sender) receiver=mx.example.com; client-ip=192.0.2.1; envelope-from=\"user@example.com\"; helo=mail.example.com;"
+        );
+    }
+
+    #[test]
+    fn test_format_received_spf_fail() {
+        let spf = SpfStatus {
+            result: "fail",
+            smtp_mailfrom: Some("spammer@evil.com".to_string()),
+            smtp_helo: Some("evil.com".to_string()),
+            client_ip: Some("10.0.0.1".to_string()),
+            domain: Some("evil.com".to_string()),
+        };
+        let header = format_received_spf("mx.example.com", &spf);
+        assert_eq!(
+            header,
+            "Received-SPF: fail (mx.example.com: domain of spammer@evil.com does not designate 10.0.0.1 as permitted sender) receiver=mx.example.com; client-ip=10.0.0.1; envelope-from=\"spammer@evil.com\"; helo=evil.com;"
+        );
+    }
+
+    #[test]
+    fn test_format_received_spf_none() {
+        let spf = SpfStatus {
+            result: "none",
+            smtp_mailfrom: None,
+            smtp_helo: Some("unknown".to_string()),
+            client_ip: None,
+            domain: None,
+        };
+        let header = format_received_spf("mx.example.com", &spf);
+        assert_eq!(
+            header,
+            "Received-SPF: none (mx.example.com: unknown does not designate permitted sender hosts) receiver=mx.example.com; helo=unknown;"
         );
     }
 }
