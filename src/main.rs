@@ -137,7 +137,7 @@ fn main() -> ExitCode {
         .build()
         .expect("failed to create tokio runtime");
 
-    let authenticator = rt.block_on(async { MessageAuthenticator::new_quad9() })
+    let authenticator = rt.block_on(async { MessageAuthenticator::new_system_conf() })
                           .expect("failed to create mail_auth::Authenticator");
 
     let reject_on_fail = config.reject_on_fail;
