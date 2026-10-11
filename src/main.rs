@@ -23,7 +23,8 @@ use mail_auth::MessageAuthenticator;
 use opensmtpd_filter::{Address, Direction, Filter, FilterResponse, Session, SmtpFilterRunner};
 use std::collections::HashMap;
 use std::process::ExitCode;
-use log::{info, warn};
+use std::io;
+use tracing::{info, warn};
 use verify::{format_auth_results, format_received_spf, verify_message, VerificationResult};
 
 struct DkimVerifyFilter {
@@ -120,9 +121,10 @@ impl Filter for DkimVerifyFilter {
 fn main() -> ExitCode {
     let config = Config::parse();
 
-    env_logger::Builder::new()
-        .filter_level(config.log_level)
-        .write_style(env_logger::WriteStyle::Never)
+    tracing_subscriber::fmt()
+        .with_max_level(config.log_level)
+        .with_writer(io::stderr)
+        .with_ansi(false)
         .init();
 
     info!(
