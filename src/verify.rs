@@ -18,7 +18,7 @@ use std::net::IpAddr;
 
 use mail_auth::common::verify::VerifySignature;
 use mail_auth::spf::verify::SpfParameters;
-use mail_auth::{AuthenticatedMessage, DkimResult, SpfResult, MessageAuthenticator};
+use mail_auth::{AuthenticatedMessage, DkimOutput, DkimResult, SpfResult, MessageAuthenticator};
 
 #[derive(Debug, Clone)]
 pub struct VerificationResult {
@@ -102,45 +102,45 @@ async fn verify_dkim(authenticator: &MessageAuthenticator, raw_message: &[u8]) -
     };
 
     let dkim_output = authenticator.verify_dkim(&authenticated_message).await;
+    summarize_dkim(&dkim_output)
+}
 
-    if dkim_output.is_empty() {
+fn dkim_rank(result: &DkimResult) -> u8 {
+    match result {
+        DkimResult::Pass => 0,
+        DkimResult::Fail(_) => 1,
+        DkimResult::TempError(_) => 2,
+        DkimResult::PermError(_) => 3,
+        DkimResult::Neutral(_) => 4,
+        DkimResult::None => 5,
+    }
+}
+
+// Any passing signature verifies the message (RFC 6376 §6.1); otherwise report the most significant failure.
+fn summarize_dkim(outputs: &[DkimOutput]) -> DkimVerifyResult {
+    let Some(best) = outputs.iter().min_by_key(|o| dkim_rank(o.result())) else {
         return DkimVerifyResult {
             result: "none",
             domain: None,
             selector: None,
             comment: Some("no signature".to_string()),
         };
-    }
+    };
 
-    for output in dkim_output.iter() {
-        let domain = output.signature().map(|s| s.domain().to_string());
-        let selector = output.signature().map(|s| s.selector().to_string());
-        match output.result() {
-            DkimResult::Pass => {
-                return DkimVerifyResult {
-                    result: "pass",
-                    domain,
-                    selector,
-                    comment: None,
-                };
-            }
-            DkimResult::Fail(err) => {
-                return DkimVerifyResult {
-                    result: "fail",
-                    domain,
-                    selector,
-                    comment: Some(err.to_string()),
-                };
-            }
-            _ => continue,
-        }
-    }
+    let (result, comment) = match best.result() {
+        DkimResult::Pass => ("pass", None),
+        DkimResult::Fail(e) => ("fail", Some(e.to_string())),
+        DkimResult::TempError(e) => ("temperror", Some(e.to_string())),
+        DkimResult::PermError(e) => ("permerror", Some(e.to_string())),
+        DkimResult::Neutral(e) => ("neutral", Some(e.to_string())),
+        DkimResult::None => ("none", None),
+    };
 
     DkimVerifyResult {
-        result: "none",
-        domain: None,
-        selector: None,
-        comment: Some("no valid signature found".to_string()),
+        result,
+        domain: best.signature().map(|s| s.domain().to_string()),
+        selector: best.signature().map(|s| s.selector().to_string()),
+        comment,
     }
 }
 
@@ -387,6 +387,66 @@ mod tests {
             header,
             "Authentication-Results: mx.example.com; dkim=fail (body hash did not verify) header.d=spoofed.com; spf=none smtp.helo=unknown"
         );
+    }
+
+    #[test]
+    fn test_summarize_dkim_no_signatures() {
+        let r = summarize_dkim(&[]);
+        assert_eq!(r.result, "none");
+        assert_eq!(r.comment.as_deref(), Some("no signature"));
+    }
+
+    #[test]
+    fn test_summarize_dkim_later_pass_beats_earlier_fail() {
+        let outputs = [
+            DkimOutput::fail(mail_auth::Error::ParseError),
+            DkimOutput::pass(),
+        ];
+        let r = summarize_dkim(&outputs);
+        assert_eq!(r.result, "pass");
+        assert_eq!(r.comment, None);
+    }
+
+    #[test]
+    fn test_summarize_dkim_fail_beats_errors() {
+        let outputs = [
+            DkimOutput::perm_err(mail_auth::Error::ParseError),
+            DkimOutput::fail(mail_auth::Error::Base64),
+            DkimOutput::temp_err(mail_auth::Error::Io("timeout".to_string())),
+        ];
+        let r = summarize_dkim(&outputs);
+        assert_eq!(r.result, "fail");
+        assert_eq!(r.comment.as_deref(), Some("Base64 encode or decode error."));
+    }
+
+    #[test]
+    fn test_summarize_dkim_temperror() {
+        let outputs = [
+            DkimOutput::neutral(mail_auth::Error::ParseError),
+            DkimOutput::temp_err(mail_auth::Error::Io("timeout".to_string())),
+        ];
+        let r = summarize_dkim(&outputs);
+        assert_eq!(r.result, "temperror");
+        assert_eq!(r.comment.as_deref(), Some("I/O error: timeout"));
+    }
+
+    #[test]
+    fn test_summarize_dkim_permerror() {
+        let outputs = [
+            DkimOutput::neutral(mail_auth::Error::ParseError),
+            DkimOutput::perm_err(mail_auth::Error::MissingParameters),
+        ];
+        let r = summarize_dkim(&outputs);
+        assert_eq!(r.result, "permerror");
+        assert_eq!(r.comment.as_deref(), Some("Missing parameters"));
+    }
+
+    #[test]
+    fn test_summarize_dkim_neutral() {
+        let outputs = [DkimOutput::neutral(mail_auth::Error::ParseError)];
+        let r = summarize_dkim(&outputs);
+        assert_eq!(r.result, "neutral");
+        assert_eq!(r.comment.as_deref(), Some("Parse error"));
     }
 
     #[test]
