@@ -16,7 +16,7 @@
 
 use std::net::IpAddr;
 
-use mail_auth::common::verify::VerifySignature;
+use mail_auth::dkim::VerifySignature;
 use mail_auth::spf::verify::SpfParameters;
 use mail_auth::{AuthenticatedMessage, DkimOutput, DkimResult, SpfResult, MessageAuthenticator};
 
@@ -168,7 +168,7 @@ async fn verify_spf(
     let sender = mail_from.unwrap_or(&default_sender);
 
     let output = authenticator
-        .verify_spf(SpfParameters::verify_mail_from(
+        .verify_spf(SpfParameters::mail_from(
             ip,
             helo,
             helo,
@@ -399,8 +399,8 @@ mod tests {
     #[test]
     fn test_summarize_dkim_later_pass_beats_earlier_fail() {
         let outputs = [
-            DkimOutput::fail(mail_auth::Error::ParseError),
-            DkimOutput::pass(),
+            DkimOutput::from(DkimResult::Fail(mail_auth::Error::Parse)),
+            DkimOutput::from(DkimResult::Pass),
         ];
         let r = summarize_dkim(&outputs);
         assert_eq!(r.result, "pass");
@@ -410,9 +410,9 @@ mod tests {
     #[test]
     fn test_summarize_dkim_fail_beats_errors() {
         let outputs = [
-            DkimOutput::perm_err(mail_auth::Error::ParseError),
-            DkimOutput::fail(mail_auth::Error::Base64),
-            DkimOutput::temp_err(mail_auth::Error::Io("timeout".to_string())),
+            DkimOutput::from(DkimResult::PermError(mail_auth::Error::Parse)),
+            DkimOutput::from(DkimResult::Fail(mail_auth::Error::Base64)),
+            DkimOutput::from(DkimResult::TempError(mail_auth::Error::Io("timeout".to_string()))),
         ];
         let r = summarize_dkim(&outputs);
         assert_eq!(r.result, "fail");
@@ -422,8 +422,8 @@ mod tests {
     #[test]
     fn test_summarize_dkim_temperror() {
         let outputs = [
-            DkimOutput::neutral(mail_auth::Error::ParseError),
-            DkimOutput::temp_err(mail_auth::Error::Io("timeout".to_string())),
+            DkimOutput::from(DkimResult::Neutral(mail_auth::Error::Parse)),
+            DkimOutput::from(DkimResult::TempError(mail_auth::Error::Io("timeout".to_string()))),
         ];
         let r = summarize_dkim(&outputs);
         assert_eq!(r.result, "temperror");
@@ -433,8 +433,8 @@ mod tests {
     #[test]
     fn test_summarize_dkim_permerror() {
         let outputs = [
-            DkimOutput::neutral(mail_auth::Error::ParseError),
-            DkimOutput::perm_err(mail_auth::Error::MissingParameters),
+            DkimOutput::from(DkimResult::Neutral(mail_auth::Error::Parse)),
+            DkimOutput::from(DkimResult::PermError(mail_auth::Error::MissingParameters)),
         ];
         let r = summarize_dkim(&outputs);
         assert_eq!(r.result, "permerror");
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_summarize_dkim_neutral() {
-        let outputs = [DkimOutput::neutral(mail_auth::Error::ParseError)];
+        let outputs = [DkimOutput::from(DkimResult::Neutral(mail_auth::Error::Parse))];
         let r = summarize_dkim(&outputs);
         assert_eq!(r.result, "neutral");
         assert_eq!(r.comment.as_deref(), Some("Parse error"));
