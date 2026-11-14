@@ -167,8 +167,24 @@ fn main() -> ExitCode {
 fn build_raw_message(lines: &[String]) -> Vec<u8> {
     let mut raw = Vec::new();
     for line in lines {
+        // smtpd hands filters dot-stuffed lines (RFC 5321 §4.5.2); undo it for verification
+        let line = line.strip_prefix('.').unwrap_or(line);
         raw.extend_from_slice(line.as_bytes());
         raw.extend_from_slice(b"\r\n");
     }
     raw
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_raw_message_unstuffs_leading_dot() {
+        let lines = ["Subject: x", "", "..composed { }", "...", "plain"].map(String::from);
+        assert_eq!(
+            build_raw_message(&lines),
+            b"Subject: x\r\n\r\n.composed { }\r\n..\r\nplain\r\n"
+        );
+    }
 }
